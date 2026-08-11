@@ -164,7 +164,7 @@
                         <ul class="nav-menu align-to-right">
                             <li>
                                 @if (empty(Session::get('login_username')))
-                                    <a href="#" data-toggle="modal" data-target="#login">
+                                    <a href="{{ route('user_login_page') }}">
                                         <i class="ti-user mr-1"></i><span
                                             class="dn-lg">{{ __('messages.login_register') }}</span>
                                     </a>
@@ -365,86 +365,6 @@
         </footer>
         <!-- ============================ Footer End ================================== -->
 
-        <!-- Log In Modal -->
-        <div class="modal fade" id="login" tabindex="-1" role="dialog" aria-labelledby="registermodal"
-            aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered login-pop-form" role="document">
-                <div class="modal-content" id="registermodal">
-                    <div class="modal-header">
-                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                            <span aria-hidden="true"><i class="ti-close"></i></span>
-                        </button>
-                    </div>
-                    <div class="modal-body">
-                        <h4 class="modal-header-title">{{ __('messages.Sign_In') }}</h4>
-                        <!-- <div class="social-login">
-                            <ul>
-                                <li><a href="#" class="btn connect-fb"><i class="ti-facebook"></i>Login with
-                                        Facebook</a></li>
-                                <li><a href="#" class="btn connect-gplus"><i class="ti-google"></i>Login with
-                                        Gmail</a>
-                                </li>
-                            </ul>
-                        </div>
-
-                        <div class="devide-wrap"><span>OR</span></div> -->
-
-                        <div class="login-form">
-                            <form id="loginUserForm" autocomplete="off">
-                                @csrf
-                                <div class="form-group">
-                                    <label>{{ __('messages.email') }}</label>
-                                    <div class="input-with-gray">
-                                        <input type="email" id="lemail" class="form-control" name="email"
-                                            placeholder="{{ __('messages.email') }}" autocomplete="new-email">
-                                        <i class="ti-user theme-cl"></i>
-                                    </div>
-                                    <span class="text-danger error-text lemail_error"></span>
-                                </div>
-
-                                <div class="form-group">
-                                    {{-- <label>{{ __('messages.Password') }}</label>
-                                    <div class="input-with-gray">
-                                        <input type="password" id="lpassword" class="form-control"
-                                            autocomplete="new-password" name="password"
-                                            placeholder="{{ __('messages.Password') }}">
-                                        <i class="ti-unlock theme-cl"></i>
-                                    </div> --}}
-
-                                    <label>{{ __('messages.Password') }}</label>
-                                    <div class="input-group" id="show_hide_spassword">
-                                        <input class="form-control" autocomplete="new-password" id="lpassword"
-                                            placeholder="{{ __('messages.Password') }}" name="password"
-                                            type="password" style="background: #f3f4f5;">
-                                        <div class="input-group-addon" style="border: none;background: #f3f4f5;">
-                                            <a href=""><i class="fa fa-eye-slash text-success"
-                                                    aria-hidden="true"></i></a>
-                                        </div>
-                                    </div>
-                                    <span id='loginmessage'></span>
-                                    <span class="text-danger error-text lpassword_error"></span>
-                                </div>
-
-                                <div class="form-group">
-                                    <button type="submit"
-                                        class="btn btn-primary btn-md full-width pop-login">{{ __('messages.Login') }}</button>
-                                </div>
-
-                            </form>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <div class="mf-link"><i class="ti-user"></i>{{ __('messages.Haven_got_an_account') }}<a
-                                href="javascript:void(0)" data-toggle="modal" data-target="#signup"
-                                data-dismiss="modal"> {{ __('messages.Sign_Up') }}</a></div>
-                        <div class="mf-forget"><a href="#" data-toggle="modal" data-target="#forget_password"
-                                id="forget_click">{{ __('messages.Forgot_password') }}<i class="ti-help"></i></a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- End Modal -->
         <input type="hidden" name="visitorCountry" id="visitorCountry"
             value="{{ Session::get('visitor_country') }}">
 
@@ -1005,7 +925,7 @@
                     </div>
                     <div class="modal-footer">
                         <div class="mf-link"><i class="ti-user"></i>{{ __('messages.Have_Account') }}<a
-                                href="#" data-toggle="modal" data-target="#login" data-dismiss="modal">
+                                href="{{ route('user_login_page') }}" data-dismiss="modal">
                                 {{ __('messages.sign_in') }}</a></div>
                     </div>
                 </div>
@@ -1618,11 +1538,6 @@
             }
         });
 
-        $('#login').on('shown.bs.modal', function() {
-            jQuery(".nav-menus-wrapper-close-button").trigger("click");
-
-        });
-
         $('#signupUpdate').on('shown.bs.modal', function() {
             jQuery(".nav-menus-wrapper-close-button").trigger("click");
         });
@@ -1885,10 +1800,6 @@
             }
         }
 
-        $('#forget_click').on("click", function() {
-            $("#login").modal('hide');
-        });
-
         $('#forgotPassword').on('submit', function(e) {
             e.preventDefault();
             $.ajax({
@@ -1962,7 +1873,6 @@
                     } else {
                         $('#loginmessage').text('');
                         $('#loginUserForm').get(0).reset();
-                        $('#login').modal('hide');
                         swal({
                             title: data.msg,
                             text: "",
@@ -2149,11 +2059,6 @@
                 $('#msgSignError').html("{{ __('messages.password_must_match') }}").css('color', 'red');
                 $('#regSubmit').prop('disabled', true);
             }
-        });
-
-        $('#login').on('hidden.bs.modal', function() {
-            $(this).find('form').trigger('reset');
-            $("#loginmessage").html('');
         });
 
         $('#signup').on('hidden.bs.modal', function() {

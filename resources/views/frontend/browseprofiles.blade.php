@@ -115,8 +115,8 @@
     {{-- @if (empty(Session::get('login_username')))
         <section class="pt-0">
             <div class="container text-center">
-                <button class="btn btn-md btn-outline-info btn-rounded mb-3" data-toggle="modal" data-target="#login">View
-                    More</button>
+                <a href="{{ route('user_login_page') }}" class="btn btn-md btn-outline-info btn-rounded mb-3">View
+                    More</a>
             </div>
         </section>
     @endif --}}

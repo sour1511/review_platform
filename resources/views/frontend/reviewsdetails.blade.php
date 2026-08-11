@@ -275,8 +275,7 @@
     @if (isset($data['reviewData']) && $data['reviewData']->count() != 0)
         <section class="p-0 mt-3">
             <div class="container text-center">
-                <button class="btn btn-md btn-outline-info mb-3" data-toggle="modal"
-                    data-target="#login">{{ __('messages.view_more') }}</button>
+                <a href="{{ route('user_login_page') }}" class="btn btn-md btn-outline-info mb-3">{{ __('messages.view_more') }}</a>
             </div>
         </section>
     @endif

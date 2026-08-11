@@ -52,6 +52,7 @@ Route::post('user/update_password', [FrontendController::class, 'updatePassword'
 
 Route::get('create/review_profile', [FrontendController::class, 'review_profile'])->name('review_profile')->middleware('frontend.auth');
 Route::get('user_logout', [FrontendController::class, 'logout'])->name('user_logout')->middleware('prevent-back-history');
+Route::get('user/login', [FrontendController::class, 'userLoginPage'])->name('user_login_page')->middleware('prevent-back-history');
 Route::post('user_Login', [FrontendController::class, 'user_Login'])->name('user_Login')->middleware('throttle:10,1');
 Route::post('register', [FrontendController::class, 'register'])->name('register')->middleware('throttle:10,1');
 Route::post('get_subcategories', [FrontendController::class, 'getSubcategory'])->name('getsubcategory');

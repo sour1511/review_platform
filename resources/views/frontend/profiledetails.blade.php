@@ -354,8 +354,7 @@
         <section class="p-0">
             <div class="container text-center">
                 <h5 class="mb-3">{{ __('messages.leave_your_own') }}</h5>
-                <button class="btn btn-md btn-outline-info btn-rounded mb-3" data-toggle="modal"
-                    data-target="#login">{{ __('messages.Add_Your_Review') }}</button>
+                <a href="{{ route('user_login_page') }}" class="btn btn-md btn-outline-info btn-rounded mb-3">{{ __('messages.Add_Your_Review') }}</a>
             </div>
         </section>
     @endif
@@ -382,8 +381,7 @@
     {{-- @if (empty(Session::get('login_username')))
         <section>
             <div class="container text-center">
-                <button class="btn btn-md btn-outline-info btn-rounded mb-3" data-toggle="modal"
-                    data-target="#login">View More</button>
+                <a href="{{ route('user_login_page') }}" class="btn btn-md btn-outline-info btn-rounded mb-3">View More</a>
             </div>
         </section>
     @endif --}}

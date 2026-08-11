@@ -657,8 +657,17 @@ class FrontendController extends Controller
 
             return view('frontend.review_profile', $data, compact('data'));
         } else {
-            return redirect('/');
+            return redirect()->route('user_login_page');
         }
+    }
+
+    public function userLoginPage()
+    {
+        if (!empty(Session::get('login_user_id'))) {
+            return redirect()->route('home');
+        }
+
+        return view('frontend.user_login');
     }
 
     public function user_Login(Request $req)

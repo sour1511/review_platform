@@ -15,7 +15,7 @@ class EnsureFrontendUser
                 return response()->json(['status' => 0, 'msg' => 'Unauthorized'], 401);
             }
 
-            return redirect()->route('home');
+            return redirect()->route('user_login_page');
         }
 
         return $next($request);

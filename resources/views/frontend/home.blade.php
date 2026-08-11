@@ -30,15 +30,13 @@
     <div class="hero-header jumbo-banner text-center" style="background: url({{ asset('frontend/assets/img/home_page_bg_one.jpg') }});" data-overlay="6">
         <div class="container">
             @if (empty(Session::get('login_username')))
-            <h2 style="line-height: initial;">{{ __('messages.home_heading_search') }} <a href="#" style="color: white;"
-                data-toggle="modal" data-target="#login"><u>{{ __('messages.home_subheading_search_create') }}</u></a> {{ __('messages.home_subheading_search') }} </h2>
+            <h2 style="line-height: initial;">{{ __('messages.home_heading_search') }} <a href="{{ route('user_login_page') }}" style="color: white;"><u>{{ __('messages.home_subheading_search_create') }}</u></a> {{ __('messages.home_subheading_search') }} </h2>
             @else    
             <h2 style="line-height: initial;">{{ __('messages.home_heading_search') }} <a href="{{ Route('review_profile') }}" style="color: white;"><u>{{ __('messages.home_subheading_search_create') }}</u></a> {{ __('messages.home_subheading_search') }} </h2>
             @endif
 
             {{-- @if (empty(Session::get('login_username')))
-                <p class="lead">{{ __('messages.home_subheading_search') }} <a href="#" style="color: white;"
-                        data-toggle="modal" data-target="#login"><u>{{ __('messages.home_subheading_search_create') }}</u></a>
+                <p class="lead">{{ __('messages.home_subheading_search') }} <a href="{{ route('user_login_page') }}" style="color: white;"><u>{{ __('messages.home_subheading_search_create') }}</u></a>
                 </p>
             @else
                 <p class="lead">{{ __('messages.home_subheading_search') }}<a href="{{ Route('review_profile') }}"
@@ -231,8 +229,7 @@
                 </div>
                 @if (empty(Session::get('login_username')))
                     <div class="container text-center mt-3">
-                        <button class="btn btn-md btn-outline-info mb-3" data-toggle="modal"
-                            data-target="#login">{{ __('messages.view_more') }}</button>
+                        <a href="{{ route('user_login_page') }}" class="btn btn-md btn-outline-info mb-3">{{ __('messages.view_more') }}</a>
                     </div>
                 @endif
             </div>
@@ -242,8 +239,8 @@
     {{-- @if (empty(Session::get('login_username')))
         <section class="pt-0">
             <div class="container text-center">
-                <button class="btn btn-md btn-outline-info mb-3" data-toggle="modal" data-target="#login">View
-                    More</button>
+                <a href="{{ route('user_login_page') }}" class="btn btn-md btn-outline-info mb-3">View
+                    More</a>
             </div>
         </section>
     @endif --}}
@@ -850,8 +847,7 @@
     @if (empty(Session::get('login_username')))
         <section class="pt-0">
             <div class="container text-center">
-                <button class="btn btn-md btn-outline-info btn-rounded mb-3" data-toggle="modal"
-                    data-target="#login">{{ __('messages.view_more') }}</button>
+                <a href="{{ route('user_login_page') }}" class="btn btn-md btn-outline-info btn-rounded mb-3">{{ __('messages.view_more') }}</a>
             </div>
         </section>
     @endif
@@ -1406,8 +1402,7 @@
     {{-- @if (empty(Session::get('login_username')))
         <section class="pt-0">
             <div class="container text-center">
-                <button class="btn btn-md btn-outline-info btn-rounded mb-3" data-toggle="modal"
-                    data-target="#login">{{ __('messages.view_more') }}</button>
+                <a href="{{ route('user_login_page') }}" class="btn btn-md btn-outline-info btn-rounded mb-3">{{ __('messages.view_more') }}</a>
             </div>
         </section>
     @endif --}}
