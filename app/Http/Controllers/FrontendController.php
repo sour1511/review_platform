@@ -30,6 +30,11 @@ class FrontendController extends Controller
 {
     protected $lastMailError = null;
 
+    public function getLastMailError(): ?string
+    {
+        return $this->lastMailError;
+    }
+
     // rk
     public function home()
     {
@@ -954,32 +959,102 @@ class FrontendController extends Controller
             return false;
         }
 
-        $apiKey = trim((string) config('services.brevo.key'));
+        // Prefer config (works with config:cache). Fall back to env for misconfigured servers.
+        $apiKey = trim((string) (config('services.brevo.key') ?: env('BREVO_API_KEY')));
+        $templateId = (int) ($payload['templateId'] ?? 0);
+
+        Log::info('Brevo send attempted', [
+            'templateId' => $templateId,
+            'to' => $payload['to'][0]['email'] ?? null,
+            'key_prefix' => $apiKey !== '' ? substr($apiKey, 0, 10) : '(empty)',
+            'has_curl' => extension_loaded('curl'),
+        ]);
+
         if ($apiKey === '') {
             $this->lastMailError = 'BREVO_API_KEY is not configured on this server.';
             Log::warning($this->lastMailError);
             return false;
         }
 
-        // Always build local HTML so we do not depend on Brevo template IDs existing.
-        $composed = $this->composeMailContent($payload);
-        if ($composed === null) {
+        if (!extension_loaded('curl') && str_starts_with($apiKey, 'xkeysib-')) {
+            $this->lastMailError = 'PHP curl extension is missing on this server.';
+            Log::error($this->lastMailError);
             return false;
         }
 
-        // Prefer REST API key (xkeysib-...) — not blocked by SMTP authorized IPs.
+        // API key: try Brevo template first, then HTML fallback.
         if (str_starts_with($apiKey, 'xkeysib-')) {
-            return $this->sendBrevoApiHtml($composed['to'], $composed['toName'], $composed['subject'], $composed['html'], $apiKey);
+            if ($templateId > 0) {
+                $templateOk = $this->sendBrevoApiTemplate($payload, $apiKey);
+                if ($templateOk) {
+                    return true;
+                }
+                Log::warning('Brevo template send failed, falling back to HTML', [
+                    'templateId' => $templateId,
+                    'error' => $this->lastMailError,
+                ]);
+            }
+
+            $composed = $this->composeMailContent($payload);
+            if ($composed === null) {
+                return false;
+            }
+
+            return $this->sendBrevoApiHtml(
+                $composed['to'],
+                $composed['toName'],
+                $composed['subject'],
+                $composed['html'],
+                $apiKey
+            );
         }
 
-        // SMTP keys work with Brevo SMTP relay (subject to authorized IP list).
+        // SMTP key path
         if (str_starts_with($apiKey, 'xsmtpsib-')) {
-            return $this->sendBrevoSmtpHtml($composed['to'], $composed['toName'], $composed['subject'], $composed['html'], $apiKey);
+            $composed = $this->composeMailContent($payload);
+            if ($composed === null) {
+                return false;
+            }
+
+            return $this->sendBrevoSmtpHtml(
+                $composed['to'],
+                $composed['toName'],
+                $composed['subject'],
+                $composed['html'],
+                $apiKey
+            );
         }
 
-        $this->lastMailError = 'BREVO_API_KEY must start with xkeysib- (API) or xsmtpsib- (SMTP).';
+        $this->lastMailError = 'BREVO_API_KEY must start with xkeysib- (API) or xsmtpsib- (SMTP). Current prefix: ' . substr($apiKey, 0, 10);
         Log::error($this->lastMailError);
         return false;
+    }
+
+    protected function sendBrevoApiTemplate(array $payload, string $apiKey): bool
+    {
+        $to = $payload['to'][0]['email'] ?? null;
+        if (empty($to)) {
+            $this->lastMailError = 'Missing email recipient.';
+            return false;
+        }
+
+        $fromEmail = trim((string) (config('services.brevo.from_address') ?: env('MAIL_FROM_ADDRESS')));
+        $fromName = trim((string) (config('services.brevo.from_name') ?: env('MAIL_FROM_NAME', config('app.name'))));
+
+        $body = [
+            'to' => $payload['to'],
+            'templateId' => (int) $payload['templateId'],
+            'params' => $payload['params'] ?? [],
+        ];
+
+        if ($fromEmail !== '') {
+            $body['sender'] = [
+                'name' => $fromName !== '' ? $fromName : 'Reviews',
+                'email' => $fromEmail,
+            ];
+        }
+
+        return $this->postBrevoApi(json_encode($body), $apiKey, $to, 'template:' . $body['templateId']);
     }
 
     protected function composeMailContent(array $payload): ?array
@@ -1031,9 +1106,9 @@ class FrontendController extends Controller
 
     protected function sendBrevoApiHtml(string $to, string $toName, string $subject, string $html, string $apiKey)
     {
-        $fromEmail = config('services.brevo.from_address');
-        $fromName = config('services.brevo.from_name');
-        if (empty($fromEmail)) {
+        $fromEmail = trim((string) (config('services.brevo.from_address') ?: env('MAIL_FROM_ADDRESS')));
+        $fromName = trim((string) (config('services.brevo.from_name') ?: env('MAIL_FROM_NAME', config('app.name'))));
+        if ($fromEmail === '') {
             $this->lastMailError = 'MAIL_FROM_ADDRESS is not configured.';
             Log::error($this->lastMailError);
             return false;
@@ -1041,7 +1116,7 @@ class FrontendController extends Controller
 
         $requestBody = json_encode([
             'sender' => [
-                'name' => $fromName,
+                'name' => $fromName !== '' ? $fromName : 'Reviews',
                 'email' => $fromEmail,
             ],
             'to' => [[
@@ -1052,6 +1127,11 @@ class FrontendController extends Controller
             'htmlContent' => $html,
         ]);
 
+        return $this->postBrevoApi($requestBody, $apiKey, $to, $subject);
+    }
+
+    protected function postBrevoApi(string $requestBody, string $apiKey, string $to, string $label): bool
+    {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, 'https://api.brevo.com/v3/smtp/email');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
@@ -1079,18 +1159,23 @@ class FrontendController extends Controller
             Log::error('Brevo API error', [
                 'http_code' => $httpCode,
                 'response' => $result,
+                'label' => $label,
             ]);
             return false;
         }
 
-        Log::info('Brevo email sent', ['to' => $to, 'subject' => $subject, 'response' => $result]);
+        Log::info('Brevo email sent', [
+            'to' => $to,
+            'label' => $label,
+            'response' => $result,
+        ]);
         return true;
     }
 
     protected function sendBrevoSmtpHtml(string $to, string $toName, string $subject, string $html, string $smtpKey)
     {
-        $smtpUser = config('services.brevo.smtp_user');
-        if (empty($smtpUser)) {
+        $smtpUser = trim((string) (config('services.brevo.smtp_user') ?: env('BREVO_SMTP_USER') ?: env('MAIL_USERNAME')));
+        if ($smtpUser === '') {
             $this->lastMailError = 'BREVO_SMTP_USER / MAIL_USERNAME is required when using a Brevo SMTP key.';
             Log::error($this->lastMailError);
             return false;
