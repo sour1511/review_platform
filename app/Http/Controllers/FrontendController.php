@@ -23,9 +23,13 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx\Rels;
 use App\Rules\ReCaptcha;
 use App;
 use App\Models\PasswordRequest;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Log;
 
 class FrontendController extends Controller
 {
+    protected $lastMailError = null;
+
     // rk
     public function home()
     {
@@ -953,31 +957,153 @@ class FrontendController extends Controller
     // email send    
     public function activationMailSend($requestBody)
     {
-        $apiKey = config('services.brevo.key');
-        if (empty($apiKey)) {
-            \Log::warning('BREVO_API_KEY is not configured; email not sent.');
+        $this->lastMailError = null;
+        $payload = is_array($requestBody) ? $requestBody : json_decode($requestBody, true);
+        if (!is_array($payload)) {
+            $this->lastMailError = 'Invalid email payload.';
+            Log::error('Brevo email payload is invalid JSON.');
             return false;
+        }
+
+        $apiKey = (string) config('services.brevo.key');
+        if ($apiKey === '') {
+            $this->lastMailError = 'BREVO_API_KEY is not configured.';
+            Log::warning('BREVO_API_KEY is not configured; email not sent.');
+            return false;
+        }
+
+        // Prefer REST API key (xkeysib-...) — it is not blocked by SMTP authorized IPs.
+        if (str_starts_with($apiKey, 'xkeysib-')) {
+            return $this->sendBrevoApiEmail(is_string($requestBody) ? $requestBody : json_encode($payload), $apiKey);
+        }
+
+        // SMTP keys work with Brevo SMTP relay (subject to authorized IP list).
+        if (str_starts_with($apiKey, 'xsmtpsib-')) {
+            return $this->sendBrevoSmtpEmail($payload, $apiKey);
+        }
+
+        $this->lastMailError = 'BREVO_API_KEY must start with xkeysib- (API) or xsmtpsib- (SMTP).';
+        Log::error($this->lastMailError);
+        return false;
+    }
+
+    protected function sendBrevoApiEmail(string $requestBody, string $apiKey)
+    {
+        // Ensure sender is present for API sends that don't include one.
+        $payload = json_decode($requestBody, true);
+        if (is_array($payload) && empty($payload['sender'])) {
+            $payload['sender'] = [
+                'name' => config('services.brevo.from_name'),
+                'email' => config('services.brevo.from_address'),
+            ];
+            $requestBody = json_encode($payload);
         }
 
         $ch = curl_init();
 
-        curl_setopt($ch, CURLOPT_URL, 'https://api.sendinblue.com/v3/smtp/email');
+        curl_setopt($ch, CURLOPT_URL, 'https://api.brevo.com/v3/smtp/email');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
         curl_setopt($ch, CURLOPT_POST, 1);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $requestBody);
 
         $headers = array();
         $headers[] = 'Accept: application/json';
-        $headers[] = 'Api-Key: ' . $apiKey;
+        $headers[] = 'api-key: ' . $apiKey;
         $headers[] = 'Content-Type: application/json';
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
         $result = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if (curl_errno($ch)) {
-            \Log::error('Brevo curl error: ' . curl_error($ch));
+            $this->lastMailError = 'Brevo curl error: ' . curl_error($ch);
+            Log::error($this->lastMailError);
+            curl_close($ch);
+            return false;
+        }
+        if ($httpCode < 200 || $httpCode >= 300) {
+            $this->lastMailError = 'Brevo API error HTTP ' . $httpCode . ': ' . $result;
+            Log::error('Brevo API error', [
+                'http_code' => $httpCode,
+                'response' => $result,
+            ]);
+            curl_close($ch);
+            return false;
         }
         curl_close($ch);
         return $result;
+    }
+
+    protected function sendBrevoSmtpEmail(array $payload, string $smtpKey)
+    {
+        $to = $payload['to'][0]['email'] ?? null;
+        $toName = $payload['to'][0]['name'] ?? $to;
+        $params = $payload['params'] ?? [];
+        $templateId = (int) ($payload['templateId'] ?? 0);
+
+        if (empty($to)) {
+            $this->lastMailError = 'Missing email recipient.';
+            Log::error('Brevo SMTP email missing recipient.');
+            return false;
+        }
+
+        $smtpUser = config('services.brevo.smtp_user');
+        if (empty($smtpUser)) {
+            $this->lastMailError = 'BREVO_SMTP_USER / MAIL_USERNAME is required when using a Brevo SMTP key.';
+            Log::error($this->lastMailError);
+            return false;
+        }
+
+        // Map Brevo template IDs used by this app to local Blade views.
+        $view = 'emails.welcome';
+        $subject = config('app.name');
+        switch ($templateId) {
+            case 3:
+                $view = 'emails.password_reset';
+                $subject = __('messages.reset_password');
+                break;
+            case 4:
+                $view = 'emails.contact';
+                $subject = 'Contact: ' . ($params['subject'] ?? config('app.name'));
+                break;
+            case 5:
+            case 6:
+                $view = 'emails.welcome';
+                $subject = 'Welcome to ' . config('app.name');
+                break;
+        }
+
+        try {
+            config([
+                'mail.default' => 'smtp',
+                'mail.mailers.smtp.transport' => 'smtp',
+                'mail.mailers.smtp.host' => config('services.brevo.smtp_host', 'smtp-relay.brevo.com'),
+                'mail.mailers.smtp.port' => (int) config('services.brevo.smtp_port', 587),
+                'mail.mailers.smtp.encryption' => 'tls',
+                'mail.mailers.smtp.username' => $smtpUser,
+                'mail.mailers.smtp.password' => $smtpKey,
+                'mail.from.address' => config('services.brevo.from_address'),
+                'mail.from.name' => config('services.brevo.from_name'),
+            ]);
+
+            // Purge any cached mailer so runtime SMTP config is used.
+            app()->forgetInstance('mail.manager');
+            Mail::clearResolvedInstances();
+
+            Mail::send($view, $params, function ($message) use ($to, $toName, $subject) {
+                $message->to($to, $toName)->subject($subject);
+            });
+
+            return true;
+        } catch (\Throwable $e) {
+            $msg = $e->getMessage();
+            if (str_contains($msg, 'Unauthorized IP address')) {
+                $this->lastMailError = 'Brevo blocked this computer IP (Unauthorized IP). In Brevo go to SMTP & API → Authorized IPs, add your public IP or disable IP restriction. Faster fix: create an API key starting with xkeysib- and put it in BREVO_API_KEY.';
+            } else {
+                $this->lastMailError = 'Brevo SMTP send failed: ' . $msg;
+            }
+            Log::error($this->lastMailError);
+            return false;
+        }
     }
 
     function setPasswordView($token)
@@ -1038,7 +1164,19 @@ class FrontendController extends Controller
                     'sub_msg1' => $msg1,
                 ],
             ]);
-            $this->activationMailSend($requestBody);
+            $sent = $this->activationMailSend($requestBody);
+            if (!$sent) {
+                Log::error('Password reset email failed to send', [
+                    'email' => $email,
+                    'error' => $this->lastMailError,
+                ]);
+                if (config('app.debug')) {
+                    return response()->json([
+                        'status' => 0,
+                        'msg' => $this->lastMailError ?: 'Email send failed. Check storage/logs/laravel.log',
+                    ]);
+                }
+            }
             return response()->json($genericOk);
         }
 

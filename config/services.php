@@ -42,6 +42,12 @@ return [
 
     'brevo' => [
         'key' => env('BREVO_API_KEY'),
+        // Brevo SMTP login email (account email shown in SMTP & API settings)
+        'smtp_user' => env('BREVO_SMTP_USER', env('MAIL_USERNAME')),
+        'smtp_host' => env('BREVO_SMTP_HOST', 'smtp-relay.brevo.com'),
+        'smtp_port' => env('BREVO_SMTP_PORT', 587),
+        'from_address' => env('MAIL_FROM_ADDRESS', 'info@quejasyelogios.com'),
+        'from_name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Reviews')),
     ],
 
     'api' => [
