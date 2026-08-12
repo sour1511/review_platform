@@ -806,29 +806,18 @@ class FrontendController extends Controller
                     $updateUser = User::where('id', $userData->id)->update(['user_pic' =>  $user_Pic_Path, 'avatar_pic' =>  $avatar_Pic_Path]);
 
                     // send email to user as per language selection
-                    if (Session::get('locale') == 'en') {
-                        $toemail = $request->email;
-                        $toname = $request->name . ' ' . $request->lname;
-                        $joinDate = $request->reg_date;
-                        $requestBody = '{ 
-                            "to":[{ "email":"' . $toemail . '","name":"' . $toname . '"}],
-                            "templateId":5,
-                            "params":{"name":"' . $toname . '","user_email":"' . $toemail . '","join_date":"' . $joinDate . '"},
-                            "headers":{"X-Mailin-custom":"custom_header_1:custom_value_1|custom_header_2:custom_value_2|custom_header_3:custom_value_3","charset":"iso-8859-1"}
-                        }';
-                        $res = $this->activationMailSend($requestBody);
-                    } else {
-                        $toemail = $request->email;;
-                        $toname = $request->name . ' ' . $request->lname;
-                        $joinDate = $request->reg_date;
-                        $requestBody = '{ 
-                            "to":[{ "email":"' . $toemail . '","name":"' . $toname . '"}],
-                            "templateId":6,
-                            "params":{"name":"' . $toname . '","user_email":"' . $toemail . '","join_date":"' . $joinDate . '"},
-                            "headers":{"X-Mailin-custom":"custom_header_1:custom_value_1|custom_header_2:custom_value_2|custom_header_3:custom_value_3","charset":"iso-8859-1"}
-                        }';
-                        $res = $this->activationMailSend($requestBody);
-                    }
+                    $toemail = $request->email;
+                    $toname = $request->name . ' ' . $request->lname;
+                    $joinDate = $request->reg_date;
+                    $this->activationMailSend([
+                        'to' => [['email' => $toemail, 'name' => $toname]],
+                        'templateId' => Session::get('locale') == 'en' ? 5 : 6,
+                        'params' => [
+                            'name' => $toname,
+                            'user_email' => $toemail,
+                            'join_date' => $joinDate,
+                        ],
+                    ]);
 
                     return response()->json(['status' => 1, 'msg' => __('messages.successfully_registered')]);
                 }
@@ -965,21 +954,27 @@ class FrontendController extends Controller
             return false;
         }
 
-        $apiKey = (string) config('services.brevo.key');
+        $apiKey = trim((string) config('services.brevo.key'));
         if ($apiKey === '') {
-            $this->lastMailError = 'BREVO_API_KEY is not configured.';
-            Log::warning('BREVO_API_KEY is not configured; email not sent.');
+            $this->lastMailError = 'BREVO_API_KEY is not configured on this server.';
+            Log::warning($this->lastMailError);
             return false;
         }
 
-        // Prefer REST API key (xkeysib-...) — it is not blocked by SMTP authorized IPs.
+        // Always build local HTML so we do not depend on Brevo template IDs existing.
+        $composed = $this->composeMailContent($payload);
+        if ($composed === null) {
+            return false;
+        }
+
+        // Prefer REST API key (xkeysib-...) — not blocked by SMTP authorized IPs.
         if (str_starts_with($apiKey, 'xkeysib-')) {
-            return $this->sendBrevoApiEmail(is_string($requestBody) ? $requestBody : json_encode($payload), $apiKey);
+            return $this->sendBrevoApiHtml($composed['to'], $composed['toName'], $composed['subject'], $composed['html'], $apiKey);
         }
 
         // SMTP keys work with Brevo SMTP relay (subject to authorized IP list).
         if (str_starts_with($apiKey, 'xsmtpsib-')) {
-            return $this->sendBrevoSmtpEmail($payload, $apiKey);
+            return $this->sendBrevoSmtpHtml($composed['to'], $composed['toName'], $composed['subject'], $composed['html'], $apiKey);
         }
 
         $this->lastMailError = 'BREVO_API_KEY must start with xkeysib- (API) or xsmtpsib- (SMTP).';
@@ -987,53 +982,7 @@ class FrontendController extends Controller
         return false;
     }
 
-    protected function sendBrevoApiEmail(string $requestBody, string $apiKey)
-    {
-        // Ensure sender is present for API sends that don't include one.
-        $payload = json_decode($requestBody, true);
-        if (is_array($payload) && empty($payload['sender'])) {
-            $payload['sender'] = [
-                'name' => config('services.brevo.from_name'),
-                'email' => config('services.brevo.from_address'),
-            ];
-            $requestBody = json_encode($payload);
-        }
-
-        $ch = curl_init();
-
-        curl_setopt($ch, CURLOPT_URL, 'https://api.brevo.com/v3/smtp/email');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $requestBody);
-
-        $headers = array();
-        $headers[] = 'Accept: application/json';
-        $headers[] = 'api-key: ' . $apiKey;
-        $headers[] = 'Content-Type: application/json';
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-
-        $result = curl_exec($ch);
-        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        if (curl_errno($ch)) {
-            $this->lastMailError = 'Brevo curl error: ' . curl_error($ch);
-            Log::error($this->lastMailError);
-            curl_close($ch);
-            return false;
-        }
-        if ($httpCode < 200 || $httpCode >= 300) {
-            $this->lastMailError = 'Brevo API error HTTP ' . $httpCode . ': ' . $result;
-            Log::error('Brevo API error', [
-                'http_code' => $httpCode,
-                'response' => $result,
-            ]);
-            curl_close($ch);
-            return false;
-        }
-        curl_close($ch);
-        return $result;
-    }
-
-    protected function sendBrevoSmtpEmail(array $payload, string $smtpKey)
+    protected function composeMailContent(array $payload): ?array
     {
         $to = $payload['to'][0]['email'] ?? null;
         $toName = $payload['to'][0]['name'] ?? $to;
@@ -1042,18 +991,10 @@ class FrontendController extends Controller
 
         if (empty($to)) {
             $this->lastMailError = 'Missing email recipient.';
-            Log::error('Brevo SMTP email missing recipient.');
-            return false;
-        }
-
-        $smtpUser = config('services.brevo.smtp_user');
-        if (empty($smtpUser)) {
-            $this->lastMailError = 'BREVO_SMTP_USER / MAIL_USERNAME is required when using a Brevo SMTP key.';
             Log::error($this->lastMailError);
-            return false;
+            return null;
         }
 
-        // Map Brevo template IDs used by this app to local Blade views.
         $view = 'emails.welcome';
         $subject = config('app.name');
         switch ($templateId) {
@@ -1073,6 +1014,89 @@ class FrontendController extends Controller
         }
 
         try {
+            $html = view($view, $params)->render();
+        } catch (\Throwable $e) {
+            $this->lastMailError = 'Email template render failed: ' . $e->getMessage();
+            Log::error($this->lastMailError);
+            return null;
+        }
+
+        return [
+            'to' => $to,
+            'toName' => $toName,
+            'subject' => $subject,
+            'html' => $html,
+        ];
+    }
+
+    protected function sendBrevoApiHtml(string $to, string $toName, string $subject, string $html, string $apiKey)
+    {
+        $fromEmail = config('services.brevo.from_address');
+        $fromName = config('services.brevo.from_name');
+        if (empty($fromEmail)) {
+            $this->lastMailError = 'MAIL_FROM_ADDRESS is not configured.';
+            Log::error($this->lastMailError);
+            return false;
+        }
+
+        $requestBody = json_encode([
+            'sender' => [
+                'name' => $fromName,
+                'email' => $fromEmail,
+            ],
+            'to' => [[
+                'email' => $to,
+                'name' => $toName,
+            ]],
+            'subject' => $subject,
+            'htmlContent' => $html,
+        ]);
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, 'https://api.brevo.com/v3/smtp/email');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $requestBody);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Accept: application/json',
+            'api-key: ' . $apiKey,
+            'Content-Type: application/json',
+        ]);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+
+        $result = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if (curl_errno($ch)) {
+            $this->lastMailError = 'Brevo curl error: ' . curl_error($ch);
+            Log::error($this->lastMailError);
+            curl_close($ch);
+            return false;
+        }
+        curl_close($ch);
+
+        if ($httpCode < 200 || $httpCode >= 300) {
+            $this->lastMailError = 'Brevo API error HTTP ' . $httpCode . ': ' . $result;
+            Log::error('Brevo API error', [
+                'http_code' => $httpCode,
+                'response' => $result,
+            ]);
+            return false;
+        }
+
+        Log::info('Brevo email sent', ['to' => $to, 'subject' => $subject, 'response' => $result]);
+        return true;
+    }
+
+    protected function sendBrevoSmtpHtml(string $to, string $toName, string $subject, string $html, string $smtpKey)
+    {
+        $smtpUser = config('services.brevo.smtp_user');
+        if (empty($smtpUser)) {
+            $this->lastMailError = 'BREVO_SMTP_USER / MAIL_USERNAME is required when using a Brevo SMTP key.';
+            Log::error($this->lastMailError);
+            return false;
+        }
+
+        try {
             config([
                 'mail.default' => 'smtp',
                 'mail.mailers.smtp.transport' => 'smtp',
@@ -1085,19 +1109,19 @@ class FrontendController extends Controller
                 'mail.from.name' => config('services.brevo.from_name'),
             ]);
 
-            // Purge any cached mailer so runtime SMTP config is used.
             app()->forgetInstance('mail.manager');
             Mail::clearResolvedInstances();
 
-            Mail::send($view, $params, function ($message) use ($to, $toName, $subject) {
+            Mail::html($html, function ($message) use ($to, $toName, $subject) {
                 $message->to($to, $toName)->subject($subject);
             });
 
+            Log::info('Brevo SMTP email sent', ['to' => $to, 'subject' => $subject]);
             return true;
         } catch (\Throwable $e) {
             $msg = $e->getMessage();
             if (str_contains($msg, 'Unauthorized IP address')) {
-                $this->lastMailError = 'Brevo blocked this computer IP (Unauthorized IP). In Brevo go to SMTP & API → Authorized IPs, add your public IP or disable IP restriction. Faster fix: create an API key starting with xkeysib- and put it in BREVO_API_KEY.';
+                $this->lastMailError = 'Brevo blocked this server IP (Unauthorized IP). Authorize the server IP in Brevo → SMTP & API → Authorized IPs, or set BREVO_API_KEY to an API key starting with xkeysib-.';
             } else {
                 $this->lastMailError = 'Brevo SMTP send failed: ' . $msg;
             }
@@ -1155,7 +1179,7 @@ class FrontendController extends Controller
             $msg1 = __('messages.received_request');
             $link = url('/user/set_password/' . $token);
             $name = ucwords($results->name . ' ' . $results->lname);
-            $requestBody = json_encode([
+            $requestBody = [
                 'to' => [['email' => $email, 'name' => $name]],
                 'templateId' => 3,
                 'params' => [
@@ -1163,19 +1187,19 @@ class FrontendController extends Controller
                     'link' => $link,
                     'sub_msg1' => $msg1,
                 ],
-            ]);
+            ];
             $sent = $this->activationMailSend($requestBody);
             if (!$sent) {
                 Log::error('Password reset email failed to send', [
                     'email' => $email,
                     'error' => $this->lastMailError,
                 ]);
-                if (config('app.debug')) {
-                    return response()->json([
-                        'status' => 0,
-                        'msg' => $this->lastMailError ?: 'Email send failed. Check storage/logs/laravel.log',
-                    ]);
-                }
+                return response()->json([
+                    'status' => 0,
+                    'msg' => config('app.debug')
+                        ? ($this->lastMailError ?: __('messages.Someting_went_wrong'))
+                        : __('messages.Someting_went_wrong'),
+                ]);
             }
             return response()->json($genericOk);
         }
@@ -1250,13 +1274,22 @@ class FrontendController extends Controller
             $message = $request->message;
             $toemail = "info@quejasyelogios.com";
             $toname = "Admin";
-            $requestBody = '{ 
-                "to":[{ "email":"' . $toemail . '","name":"' . $toname . '"}],
-                "templateId":4,
-                "params":{"name":"' . $name . '","email":"' . $email . '","subject":"' . $subject . '","message":"' . $message . '"},
-                "headers":{"X-Mailin-custom":"custom_header_1:custom_value_1|custom_header_2:custom_value_2|custom_header_3:custom_value_3","charset":"iso-8859-1"}
-            }';
-            $this->activationMailSend($requestBody);
+            $sent = $this->activationMailSend([
+                'to' => [['email' => $toemail, 'name' => $toname]],
+                'templateId' => 4,
+                'params' => [
+                    'name' => $name,
+                    'email' => $email,
+                    'subject' => $subject,
+                    'message' => $message,
+                ],
+            ]);
+            if (!$sent) {
+                Log::error('Contact email failed to send', ['error' => $this->lastMailError]);
+                return redirect(route('contact') . '/#contact_us')
+                    ->with('error', __('messages.Someting_went_wrong'))
+                    ->withInput();
+            }
 
             return redirect(route('contact') . '/#contact_us')->with('success', __('messages.Thank_You'));
         } catch (Exception $e) {
